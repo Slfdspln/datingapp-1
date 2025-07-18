@@ -1,0 +1,681 @@
+import React, { useState, useRef } from 'react';
+import { StyleSheet, View, TouchableOpacity, Dimensions, ActivityIndicator, Modal, FlatList, Platform, KeyboardAvoidingView, ScrollView } from 'react-native';
+import { Text, TextInput, Chip } from 'react-native-paper';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import { useRouter } from 'expo-router';
+import Animated, { FadeIn, SlideInRight, SlideOutLeft } from 'react-native-reanimated';
+import DateTimePicker from '@react-native-community/datetimepicker';
+import { Ionicons } from '@expo/vector-icons';
+import { LinearGradient } from 'expo-linear-gradient';
+import { supabase } from '../utils/supabase';
+import { useAuth } from '../contexts/AuthContext';
+import { colors } from '../utils/theme';
+import AppLogo from '../../assets/app-logo';
+
+const { width } = Dimensions.get('window');
+
+const INTERESTS = [
+  'Reading', 'Foodie Tour', 'Movies', 'E-Sports', 'K-Pop', 
+  'Aquarium', 'Hot Springs', 'Walking', 'Photography', 
+  'Instagram', 'Exhibition', 'Escape Cafe', 'Sports', 
+  'Shopping', 'Brunch', 'Street Food', 'Clubbing', 'Collecting',
+  'Boba Tea', 'Cars', 'Start ups', 'Badminton', 'Rugby', 'Boxing',
+  '90s Kid', 'Self Care', 'Hot Yoga', 'Meditation', 'Basketball',
+  'Running', 'Sneakers', 'Hockey', 'Gym', 'Singing', 'Coffee'
+];
+
+// Lookup colors for selected interests
+const ACCENT_COLOR = '#FF4458';
+const ACCENT_GRADIENT = ['#FF4458', '#FF7B69'];
+
+
+export default function OnboardingScreen() {
+  const router = useRouter();
+  const { user, updateProfile } = useAuth();
+  
+  // References
+  const scrollViewRef = useRef(null);
+  
+  // State variables
+  const [currentStep, setCurrentStep] = useState(0);
+  const [profileData, setProfileData] = useState({
+    name: '',
+    birthdate: new Date(2000, 0, 1),
+    gender: '',
+    lookingFor: '',
+    bio: '',
+    interests: [],
+    location: '',
+  });
+  const [showDatePicker, setShowDatePicker] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [showInterestsModal, setShowInterestsModal] = useState(false);
+  const [showLookingForModal, setShowLookingForModal] = useState(false);
+  
+  const handleNext = () => {
+    if (currentStep < 4) {
+      setCurrentStep(currentStep + 1);
+    } else {
+      handleSubmit();
+    }
+  };
+  
+  const handleBack = () => {
+    if (currentStep > 0) {
+      setCurrentStep(currentStep - 1);
+    }
+  };
+  
+  const handleDateChange = (event, selectedDate) => {
+    setShowDatePicker(false);
+    if (selectedDate) {
+      setProfileData({ ...profileData, birthdate: selectedDate });
+    }
+  };
+  
+  const toggleInterest = (interest) => {
+    if (profileData.interests.includes(interest)) {
+      setProfileData({
+        ...profileData,
+        interests: profileData.interests.filter(i => i !== interest)
+      });
+    } else {
+      if (profileData.interests.length < 5) {
+        setProfileData({
+          ...profileData,
+          interests: [...profileData.interests, interest]
+        });
+      }
+    }
+  };
+  
+  const calculateAge = (birthdate) => {
+    const today = new Date();
+    let age = today.getFullYear() - birthdate.getFullYear();
+    const m = today.getMonth() - birthdate.getMonth();
+    if (m < 0 || (m === 0 && today.getDate() < birthdate.getDate())) {
+      age--;
+    }
+    return age;
+  };
+  
+  const handleSubmit = async () => {
+    setLoading(true);
+    
+    try {
+      if (!user) {
+        throw new Error('User not authenticated');
+      }
+      
+      // Calculate age from birthdate
+      const age = calculateAge(profileData.birthdate);
+      
+      // Create a profile in the profiles table
+      const { error } = await supabase
+        .from('profiles')
+        .upsert({
+          id: user.id,
+          name: profileData.name,
+          birthdate: profileData.birthdate.toISOString(),
+          age: age,
+          gender: profileData.gender,
+          looking_for: profileData.lookingFor,
+          bio: profileData.bio,
+          interests: profileData.interests,
+          location: profileData.location,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        });
+      
+      if (error) {
+        throw error;
+      }
+      
+      // Update user metadata
+      await updateProfile({
+        name: profileData.name,
+        age: age,
+        gender: profileData.gender,
+      });
+      
+      // Navigate to main app
+      router.replace('/(tabs)');
+    } catch (error) {
+      console.error('Error creating profile:', error.message);
+      alert('Failed to create profile. Please try again.');
+    } finally {
+      setLoading(false);
+    }
+  };
+  
+  // Helper function to check if the user can proceed to the next step
+  const canProceed = () => {
+    switch (currentStep) {
+      case 0:
+        return profileData.name.trim().length > 0;
+      case 1:
+        return profileData.gender && profileData.lookingFor;
+      case 2:
+        return profileData.bio.trim().length > 0;
+      case 3:
+        return profileData.interests.length > 0;
+      case 4:
+        return profileData.location.trim().length > 0;
+      default:
+        return false;
+    }
+  };
+
+  // Handle opening the interests modal
+  const openInterestsModal = () => {
+    setShowInterestsModal(true);
+  };
+
+  // Handle opening the looking for modal
+  const openLookingForModal = () => {
+    setShowLookingForModal(true);
+  };
+
+  // Render the current step
+  const renderStep = () => {
+    switch (currentStep) {
+      case 0:
+        return (
+          <Animated.View 
+            entering={FadeIn.duration(500)} 
+            style={styles.stepContainer}
+          >
+            <View style={styles.logoContainer}>
+              <AppLogo width={120} height={50} />
+            </View>
+            <Text variant="headlineMedium" style={styles.stepTitle}>Welcome!</Text>
+            <Text style={styles.stepDescription}>
+              Let's set up your profile so you can start connecting with others.
+            </Text>
+            
+            <View style={styles.inputContainer}>
+              <TextInput
+                label="What's your name?"
+                value={profileData.name}
+                onChangeText={(text) => setProfileData({ ...profileData, name: text })}
+                mode="outlined"
+                style={styles.input}
+                theme={{ colors: { primary: ACCENT_COLOR, onSurfaceVariant: '#999' } }}
+                textColor="#fff"
+                outlineColor="#333"
+                activeOutlineColor={ACCENT_COLOR}
+              />
+            </View>
+            
+            <View style={styles.stepImage}>
+              <LinearGradient
+                colors={['rgba(255, 75, 85, 0.3)', 'rgba(255, 123, 105, 0.3)']}
+                style={styles.iconBackground}
+              >
+                <Ionicons name="person-circle" size={80} color={ACCENT_COLOR} />
+              </LinearGradient>
+              <Text style={styles.stepIconText}>Profile Setup</Text>
+            </View>
+          </Animated.View>
+        );
+        
+      case 1:
+        return (
+          <Animated.View 
+            entering={SlideInRight.duration(300)} 
+            exiting={SlideOutLeft.duration(300)}
+            style={styles.stepContainer}
+          >
+            <Text variant="headlineMedium" style={styles.stepTitle}>About You</Text>
+            <Text style={styles.stepDescription}>
+              Tell us a bit about yourself to create your profile.
+            </Text>
+            
+            <View style={styles.inputContainer}>
+              <Text style={styles.inputLabel}>When were you born?</Text>
+              <TouchableOpacity 
+                style={styles.datePickerButton}
+                onPress={() => setShowDatePicker(true)}
+              >
+                <Text style={styles.datePickerText}>
+                  {profileData.birthdate.toLocaleDateString()}
+                </Text>
+                <Ionicons name="calendar" size={20} color={ACCENT_COLOR} />
+              </TouchableOpacity>
+              
+              {showDatePicker && (
+                <DateTimePicker
+                  value={profileData.birthdate}
+                  mode="date"
+                  display="default"
+                  onChange={handleDateChange}
+                  maximumDate={new Date(new Date().setFullYear(new Date().getFullYear() - 18))}
+                  minimumDate={new Date(new Date().setFullYear(new Date().getFullYear() - 100))}
+                />
+              )}
+                
+              <View style={styles.sectionDivider} />
+                
+              <Text style={styles.inputLabel}>I am a...</Text>
+              <View style={styles.genderButtons}>
+                <TouchableOpacity 
+                  style={[styles.genderButton, profileData.gender === 'male' && styles.genderButtonSelected]} 
+                  onPress={() => setProfileData({...profileData, gender: 'male'})}
+                >
+                  <Text style={[styles.genderButtonText, profileData.gender === 'male' && styles.genderButtonTextSelected]}>Man</Text>
+                </TouchableOpacity>
+                <TouchableOpacity 
+                  style={[styles.genderButton, profileData.gender === 'female' && styles.genderButtonSelected]} 
+                  onPress={() => setProfileData({...profileData, gender: 'female'})}
+                >
+                  <Text style={[styles.genderButtonText, profileData.gender === 'female' && styles.genderButtonTextSelected]}>Woman</Text>
+                </TouchableOpacity>
+                <TouchableOpacity 
+                  style={[styles.genderButton, profileData.gender === 'other' && styles.genderButtonSelected]} 
+                  onPress={() => setProfileData({...profileData, gender: 'other'})}
+                >
+                  <Text style={[styles.genderButtonText, profileData.gender === 'other' && styles.genderButtonTextSelected]}>Other</Text>
+                </TouchableOpacity>
+              </View>
+                
+              <View style={styles.sectionDivider} />
+                
+              <Text style={styles.inputLabel}>I am looking for...</Text>
+              <TouchableOpacity
+                style={styles.lookingForButton}
+                onPress={openLookingForModal}
+              >
+                <Text style={styles.lookingForText}>
+                  {profileData.lookingFor ? profileData.lookingFor === 'male' ? 'Men' : profileData.lookingFor === 'female' ? 'Women' : 'Everyone' : 'Select preference'}
+                </Text>
+                <Ionicons name="chevron-forward" size={20} color="#888" />
+              </TouchableOpacity>
+            </View>
+          </Animated.View>
+        );
+
+      case 2:
+        return (
+          <Animated.View 
+            entering={SlideInRight.duration(300)} 
+            exiting={SlideOutLeft.duration(300)}
+            style={styles.stepContainer}
+          >
+            <Text variant="headlineMedium" style={styles.stepTitle}>Your Bio</Text>
+            <Text style={styles.stepDescription}>
+              Tell potential matches about yourself.
+            </Text>
+            
+            <View style={styles.inputContainer}>
+              <TextInput
+                label="About me"
+                value={profileData.bio}
+                onChangeText={(text) => setProfileData({ ...profileData, bio: text })}
+                mode="outlined"
+                multiline
+                numberOfLines={4}
+                style={styles.bioInput}
+                maxLength={300}
+                theme={{ colors: { primary: ACCENT_COLOR, onSurfaceVariant: '#999' } }}
+                textColor="#fff"
+                outlineColor="#333"
+                activeOutlineColor={ACCENT_COLOR}
+              />
+              <Text style={styles.charCount}>{profileData.bio.length}/300</Text>
+            </View>
+            
+            <View style={styles.stepImage}>
+              <LinearGradient
+                colors={['rgba(255, 75, 85, 0.3)', 'rgba(255, 123, 105, 0.3)']}
+                style={styles.iconBackground}
+              >
+                <Ionicons name="create-outline" size={80} color={ACCENT_COLOR} />
+              </LinearGradient>
+              <Text style={styles.stepIconText}>Your Story</Text>
+            </View>
+          </Animated.View>
+        );
+        
+      case 3:
+        return (
+          <Animated.View 
+            entering={SlideInRight.duration(300)} 
+            exiting={SlideOutLeft.duration(300)}
+            style={styles.stepContainer}
+          >
+            <Text variant="headlineMedium" style={styles.stepTitle}>Your Interests</Text>
+            <Text style={styles.stepDescription}>
+              Select up to 5 interests to show on your profile.
+            </Text>
+            
+            <View style={styles.inputContainer}>
+              <View style={styles.interestsContainer}>
+                {profileData.interests.length > 0 ? (
+                  <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.selectedInterestsScroll}>
+                    <View style={styles.selectedInterests}>
+                      {profileData.interests.map((interest) => (
+                        <Chip
+                          key={interest}
+                          mode="outlined"
+                          selected
+                          selectedColor={ACCENT_COLOR}
+                          textStyle={{ color: ACCENT_COLOR }}
+                          style={styles.interestChip}
+                          onPress={() => toggleInterest(interest)}
+                        >
+                          {interest}
+                        </Chip>
+                      ))}
+                    </View>
+                  </ScrollView>
+                ) : (
+                  <Text style={styles.noInterestsText}>No interests selected yet</Text>
+                )}
+              </View>
+              
+              <TouchableOpacity 
+                style={styles.addInterestsButton}
+                onPress={openInterestsModal}
+                disabled={profileData.interests.length >= 5}
+              >
+                <LinearGradient
+                  colors={profileData.interests.length >= 5 ? ['#666', '#444'] : ['#FF4458', '#FF7B69']}
+                  start={{ x: 0, y: 0 }}
+                  end={{ x: 1, y: 1 }}
+                  style={styles.addInterestsGradient}
+                >
+                  <Text style={styles.addInterestsText}>
+                    {profileData.interests.length >= 5 ? "Max interests selected" : "Add Interests"}
+                  </Text>
+                  {profileData.interests.length < 5 && <Ionicons name="add-circle" size={20} color="#fff" />}
+                </LinearGradient>
+              </TouchableOpacity>
+              
+              <Text style={styles.interestsCounter}>
+                {profileData.interests.length}/5 interests selected
+              </Text>
+            </View>
+            
+            <View style={styles.stepImage}>
+              <LinearGradient
+                colors={['rgba(255, 75, 85, 0.3)', 'rgba(255, 123, 105, 0.3)']}
+                style={styles.iconBackground}
+              >
+                <Ionicons name="heart" size={80} color={ACCENT_COLOR} />
+              </LinearGradient>
+              <Text style={styles.stepIconText}>Your Passions</Text>
+            </View>
+          </Animated.View>
+        );
+      
+      case 4:
+        return (
+          <Animated.View 
+            entering={SlideInRight.duration(300)} 
+            exiting={SlideOutLeft.duration(300)}
+            style={styles.stepContainer}
+          >
+            <Text variant="headlineMedium" style={styles.stepTitle}>Your Location</Text>
+            <Text style={styles.stepDescription}>
+              Let us know your location to find matches near you.
+            </Text>
+            
+            <View style={styles.inputContainer}>
+              <TextInput
+                label="Location"
+                value={profileData.location}
+                onChangeText={(text) => setProfileData({ ...profileData, location: text })}
+                mode="outlined"
+                style={styles.input}
+                theme={{ colors: { primary: ACCENT_COLOR, onSurfaceVariant: '#999' } }}
+                textColor="#fff"
+                outlineColor="#333"
+                activeOutlineColor={ACCENT_COLOR}
+                right={<TextInput.Icon icon="map-marker" color={ACCENT_COLOR} />}
+              />
+            </View>
+            
+            <View style={styles.stepImage}>
+              <LinearGradient
+                colors={['rgba(255, 75, 85, 0.3)', 'rgba(255, 123, 105, 0.3)']}
+                style={styles.iconBackground}
+              >
+                <Ionicons name="location" size={80} color={ACCENT_COLOR} />
+              </LinearGradient>
+              <Text style={styles.stepIconText}>Your Area</Text>
+            </View>
+          </Animated.View>
+        );
+      
+      default:
+        return null;
+    }
+  };
+  
+  const isNextDisabled = () => {
+    switch (currentStep) {
+      case 0:
+        return !profileData.name;
+      case 1:
+        return !profileData.gender || !profileData.lookingFor;
+      case 2:
+        return profileData.bio.length < 10;
+      case 3:
+        return profileData.interests.length === 0;
+      case 4:
+        return !profileData.location;
+      default:
+        return false;
+    }
+  };
+  
+  return (
+    <SafeAreaView style={styles.container}>
+      <View style={styles.progressContainer}>
+        {[0, 1, 2, 3, 4].map((step) => (
+          <View 
+            key={step}
+            style={[
+              styles.progressDot,
+              currentStep === step ? styles.activeDot : {},
+              currentStep > step ? styles.completedDot : {},
+            ]}
+          />
+        ))}
+      </View>
+      
+      <ScrollView
+        ref={scrollViewRef}
+        horizontal
+        pagingEnabled
+        scrollEnabled={false}
+        showsHorizontalScrollIndicator={false}
+        style={styles.scrollView}
+      >
+        {[0, 1, 2, 3, 4].map((step) => (
+          <View key={step} style={[styles.screen, { width }]}>
+            {currentStep === step && renderStep()}
+          </View>
+        ))}
+      </ScrollView>
+      
+      <View style={styles.buttonsContainer}>
+        {currentStep > 0 && (
+          <Button
+            mode="outlined"
+            onPress={handleBack}
+            style={styles.backButton}
+          >
+            Back
+          </Button>
+        )}
+        
+        <View style={styles.footer}>
+          <TouchableOpacity
+            onPress={handleNext}
+            disabled={!canProceed() || loading}
+            style={[styles.nextButton, !canProceed() && styles.disabledButton]}
+          >
+            <LinearGradient
+              colors={['#FF7B69', '#FF4458']}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 0 }}
+              style={styles.gradientButton}
+            >
+              {loading ? (
+                <ActivityIndicator color="#fff" size="small" />
+              ) : (
+                <Text style={styles.buttonText}>{currentStep < 4 ? 'NEXT' : 'COMPLETE'}</Text>
+              )}
+            </LinearGradient>
+          </TouchableOpacity>
+        </View>
+      </View>
+    </SafeAreaView>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: '#000',
+  },
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#222',
+    position: 'relative',
+  },
+  backButton: {
+    position: 'absolute',
+    left: 16,
+  },
+  stepIndicator: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#fff',
+  },
+  logoContainer: {
+    alignItems: 'center',
+    marginBottom: 30,
+  },
+  progressContainer: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    paddingVertical: 16,
+  },
+  progressDot: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    backgroundColor: '#e0e0e0',
+    marginHorizontal: 4,
+  },
+  activeDot: {
+    backgroundColor: colors.primary,
+    transform: [{ scale: 1.2 }],
+  },
+  completedDot: {
+    backgroundColor: colors.success,
+  },
+  scrollView: {
+    flex: 1,
+  },
+  screen: {
+    flex: 1,
+  },
+  stepContainer: {
+    width: width,
+    padding: 20,
+  },
+  stepTitle: {
+    marginBottom: 8,
+    textAlign: 'center',
+    color: '#fff',
+    fontSize: 28,
+    fontWeight: 'bold',
+  },
+  stepDescription: {
+    marginBottom: 24,
+    textAlign: 'center',
+    color: '#aaa',
+    fontSize: 16,
+  },
+  inputContainer: {
+    marginBottom: 20,
+  },
+  input: {
+    marginBottom: 12,
+    backgroundColor: '#121212',
+  },
+  inputLabel: {
+    fontSize: 16,
+    marginBottom: 8,
+    color: '#fff',
+  },
+  charCount: {
+    textAlign: 'right',
+    color: '#757575',
+    fontSize: 12,
+  },
+  datePickerButton: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: 12,
+    borderWidth: 1,
+    borderColor: '#333',
+    borderRadius: 8,
+    marginBottom: 16,
+    backgroundColor: '#121212',
+  },
+  datePickerText: {
+    color: '#fff',
+  },
+  stepImage: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 40,
+  },
+  iconBackground: {
+    width: 140,
+    height: 140,
+    borderRadius: 70,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  stepIconText: {
+    marginTop: 16,
+    fontSize: 18,
+    color: '#ccc',
+  },
+  interestsContainer: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    marginBottom: 16,
+  },
+  interestChip: {
+    margin: 4,
+  },
+  selectedChip: {
+    borderWidth: 0,
+  },
+  footer: {
+    padding: 16,
+    borderTopWidth: 1,
+    borderTopColor: '#222',
+  },
+  nextButton: {
+    width: '100%',
+    height: 50,
+    borderRadius: 25,
+    overflow: 'hidden',
+  },
+  disabledButton: {
+    opacity: 0.5,
+    flex: 1,
+  },
+});
